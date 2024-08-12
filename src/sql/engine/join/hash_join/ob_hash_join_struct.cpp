@@ -18,11 +18,13 @@ namespace oceanbase
 {
 namespace sql
 {
-int ObHJStoredRow::convert_one_row_to_exprs(const ExprFixedArray &exprs,
-                                            ObEvalCtx &eval_ctx,
-                                            const RowMeta &row_meta,
-                                            const ObHJStoredRow *row,
-                                            const int64_t batch_idx)
+
+int ObHJStoredRow::convert_rows_to_exprs(const ExprFixedArray &exprs,
+                                         ObEvalCtx &eval_ctx,
+                                         const RowMeta &row_meta,
+                                         const ObHJStoredRow **rows,
+                                         const uint16_t *sel,
+                                         const uint16_t sel_cnt)
 {
   int ret = OB_SUCCESS;
   for (int64_t i = 0; OB_SUCC(ret) && i < exprs.count(); i++) {
@@ -31,13 +33,17 @@ int ObHJStoredRow::convert_one_row_to_exprs(const ExprFixedArray &exprs,
       continue;
     } else {
       ObIVector *vec = expr->get_vector(eval_ctx);
-      if (OB_FAIL(vec->from_row(row_meta, row, batch_idx, i))) {
-        LOG_WARN("fail to set row to vector", K(ret), K(batch_idx), K(i), K(*expr));
+      if (OB_FAIL(vec->from_rows(row_meta,
+                                 reinterpret_cast<const ObCompactRow **>(rows),
+                                 sel,
+                                 sel_cnt,
+                                 i))) {
+        LOG_WARN("fail to set rows to vector", K(ret), K(i), K(*expr));
       }
       exprs.at(i)->set_evaluated_projected(eval_ctx);
     }
   }
-  return ret;
+  return ret; 
 }
 
 int ObHJStoredRow::attach_rows(const ObExprPtrIArray &exprs,
@@ -52,7 +58,7 @@ int ObHJStoredRow::attach_rows(const ObExprPtrIArray &exprs,
   } else {
     for (int64_t col_idx = 0; OB_SUCC(ret) && col_idx < exprs.count(); col_idx++) {
       ObExpr *expr = exprs.at(col_idx);
-      if (OB_FAIL(expr->init_vector_default(ctx, selector[size - 1] + 1))) {
+      if (OB_FAIL(expr->init_vector_default(ctx, ctx.max_batch_size_))) {
         LOG_WARN("fail to init vector", K(ret));
       } else {
         ObIVector *vec = expr->get_vector(ctx);

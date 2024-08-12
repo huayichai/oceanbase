@@ -278,7 +278,7 @@ int ObHashJoinVecOp::inner_open()
                        probe_batch_rows_.brs_.skip_, ObBitVector::memory_size(batch_size),
                        probe_batch_rows_.key_data_, join_table_.get_normalized_key_size() * batch_size,
                        jt_ctx_.stored_rows_, sizeof(*jt_ctx_.stored_rows_) * batch_size,
-                       jt_ctx_.cur_items_, sizeof(*jt_ctx_.cur_items_) * batch_size));
+                       jt_ctx_.scan_chain_rows_, sizeof(*jt_ctx_.scan_chain_rows_) * batch_size));
     const ObExprPtrIArray &left_output = left_->get_spec().output_;
     left_vectors_.set_allocator(&mem_context_->get_arena_allocator());
     OZ (left_vectors_.init(left_output.count()));
@@ -296,6 +296,7 @@ int ObHashJoinVecOp::init_join_table_ctx()
   jt_ctx_.eval_ctx_ = &eval_ctx_;
   jt_ctx_.join_type_ = MY_SPEC.join_type_;
   jt_ctx_.join_conds_ = &MY_SPEC.join_conds_;
+  jt_ctx_.other_conds_ = &MY_SPEC.other_join_conds_;
   jt_ctx_.build_keys_ = &MY_SPEC.build_keys_;
   jt_ctx_.probe_keys_ = &MY_SPEC.probe_keys_;
   jt_ctx_.build_key_proj_ = &MY_SPEC.build_key_proj_;
@@ -320,6 +321,86 @@ int ObHashJoinVecOp::init_join_table_ctx()
   for (int64_t i = 0; !jt_ctx_.contain_ns_equal_ && i < MY_SPEC.is_ns_equal_cond_.count(); i++) {
     if (MY_SPEC.is_ns_equal_cond_.at(i)) {
       jt_ctx_.contain_ns_equal_ = true;
+    }
+  }
+  ObIAllocator *ht_alloc_ = &mem_context_->get_arena_allocator();
+  if (OB_SUCC(ret) && !jt_ctx_.probe_opt_) {
+    void *sel_buf = ht_alloc_->alloc(
+                      sizeof(*jt_ctx_.unmatch_sel_)
+                      * jt_ctx_.max_batch_size_);
+    void *rows_buf = ht_alloc_->alloc(
+                      sizeof(*jt_ctx_.unmatch_rows_)
+                      * jt_ctx_.max_batch_size_);
+    void *match_buf = ht_alloc_->alloc(
+                      sizeof(*jt_ctx_.join_cond_match_)
+                      * jt_ctx_.max_batch_size_);
+    void *skip_buf = ht_alloc_->alloc(
+                      ObBitVector::memory_size(jt_ctx_.max_batch_size_));
+    if (OB_ISNULL(sel_buf) || OB_ISNULL(rows_buf) 
+        || OB_ISNULL(match_buf) || OB_ISNULL(skip_buf)) {
+      ret = OB_ALLOCATE_MEMORY_FAILED;
+      if (OB_NOT_NULL(sel_buf)) {
+        ht_alloc_->free(sel_buf);
+        sel_buf = nullptr;
+      }
+      if (OB_NOT_NULL(rows_buf)) {
+        ht_alloc_->free(rows_buf);
+        rows_buf = nullptr;
+      }
+      if (OB_NOT_NULL(match_buf)) {
+        ht_alloc_->free(match_buf);
+        match_buf = nullptr;
+      }
+      if (OB_NOT_NULL(skip_buf)) {
+        ht_alloc_->free(skip_buf);
+        skip_buf = nullptr;
+      }
+      LOG_WARN("failed to alloc memory", K(ret));
+    } else {
+      jt_ctx_.unmatch_sel_ = reinterpret_cast<uint16_t *>(sel_buf);
+      jt_ctx_.unmatch_rows_ = reinterpret_cast<ObHJStoredRow **>(rows_buf);
+      jt_ctx_.join_cond_match_ = reinterpret_cast<bool *>(match_buf);
+      jt_ctx_.eval_skip_ = reinterpret_cast<ObBitVector *>(skip_buf);
+    }
+    if (OB_SUCC(ret) && jt_ctx_.need_probe_del_match()) {
+      void *bkt_buf = ht_alloc_->alloc(
+                        sizeof(*jt_ctx_.cur_bkts_)
+                        * jt_ctx_.max_batch_size_);
+      void *prev_rows_buf = ht_alloc_->alloc(
+                              sizeof(*jt_ctx_.prev_rows_)
+                              * jt_ctx_.max_batch_size_);
+      void *unmatch_bkt_buf = ht_alloc_->alloc(
+                                sizeof(*jt_ctx_.unmatch_bkts_)
+                                * jt_ctx_.max_batch_size_);
+      void *unmatch_prev_buf = ht_alloc_->alloc(
+                                sizeof(*jt_ctx_.unmatch_prev_rows_)
+                                * jt_ctx_.max_batch_size_);
+      if (OB_ISNULL(bkt_buf) || OB_ISNULL(prev_rows_buf)
+          || OB_ISNULL(unmatch_bkt_buf) || OB_ISNULL(unmatch_prev_buf)) {
+        ret = OB_ALLOCATE_MEMORY_FAILED;
+        if (OB_NOT_NULL(bkt_buf)) {
+          ht_alloc_->free(bkt_buf);
+          bkt_buf = nullptr;
+        }
+        if (OB_NOT_NULL(prev_rows_buf)) {
+          ht_alloc_->free(prev_rows_buf);
+          prev_rows_buf = nullptr;
+        }
+        if (OB_NOT_NULL(unmatch_bkt_buf)) {
+          ht_alloc_->free(bkt_buf);
+          unmatch_bkt_buf = nullptr;
+        }
+        if (OB_NOT_NULL(unmatch_prev_buf)) {
+          ht_alloc_->free(prev_rows_buf);
+          unmatch_prev_buf = nullptr;
+        }
+        LOG_WARN("failed to alloc memory", K(ret));
+      } else {
+        jt_ctx_.cur_bkts_ = reinterpret_cast<void **>(bkt_buf);
+        jt_ctx_.prev_rows_ = reinterpret_cast<ObHJStoredRow **>(prev_rows_buf);
+        jt_ctx_.unmatch_bkts_ = reinterpret_cast<void **>(unmatch_bkt_buf);
+        jt_ctx_.unmatch_prev_rows_ = reinterpret_cast<ObHJStoredRow **>(unmatch_prev_buf);
+      }
     }
   }
 

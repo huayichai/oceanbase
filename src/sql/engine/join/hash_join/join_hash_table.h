@@ -58,7 +58,7 @@ public:
   int64_t get_collisions() { return hash_table_->get_collisions(); }
 
 private:
-  IHashTable *hash_table_;
+  HashTable *hash_table_;
 };
 
 } // end namespace sql

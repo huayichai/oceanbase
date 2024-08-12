@@ -28,8 +28,6 @@ namespace oceanbase
 namespace sql
 {
 
-static const uint64_t END_ITEM = UINT64_MAX >> 1;
-
 struct ObHJStoredRow : public ObCompactRow
 {
   const static int64_t HASH_VAL_BIT = 63;
@@ -104,11 +102,12 @@ struct ObHJStoredRow : public ObCompactRow
     get_extra_info(row_meta).set_next(ptr);
   }
 
-  static int convert_one_row_to_exprs(const ExprFixedArray &exprs,
-                                      ObEvalCtx &eval_ctx,
-                                      const RowMeta &row_meta,
-                                      const ObHJStoredRow *row,
-                                      const int64_t batch_idx);
+  static int convert_rows_to_exprs(const ExprFixedArray &exprs,
+                                   ObEvalCtx &eval_ctx,
+                                   const RowMeta &row_meta,
+                                   const ObHJStoredRow **rows,
+                                   const uint16_t *sel,
+                                   const uint16_t sel_cnt);
   static int attach_rows(const ObExprPtrIArray &exprs,
                          ObEvalCtx &ctx,
                          const RowMeta &row_meta,
@@ -209,16 +208,19 @@ public:
 struct JoinTableCtx {
 public:
   JoinTableCtx() : eval_ctx_(NULL), join_type_(UNKNOWN_JOIN), is_shared_(false),
-                   contain_ns_equal_(false), join_conds_(NULL), build_output_(NULL), probe_output_(NULL),
+                   contain_ns_equal_(false), join_conds_(NULL), other_conds_(NULL),
+                   build_output_(NULL), probe_output_(NULL),
                    calc_exprs_(NULL), probe_opt_(false), build_keys_(NULL), probe_keys_(NULL),
                    build_key_proj_(NULL), probe_key_proj_(NULL), cur_bkid_(-1),
-                   cur_tuple_(reinterpret_cast<void *>(END_ITEM)), max_output_cnt_(NULL),
-                   cur_items_(NULL), stored_rows_(NULL), max_batch_size_(0),
+                   cur_tuple_(reinterpret_cast<void *>(0x0000FFFFFFFFFFFF)), max_output_cnt_(NULL),
+                   scan_chain_rows_(NULL), unmatch_rows_(NULL), join_cond_match_(NULL), 
+                   unmatch_sel_(NULL), unmatch_sel_cnt_(0), eval_skip_(NULL),
+                   cur_bkts_(NULL), prev_rows_(NULL), stored_rows_(NULL), max_batch_size_(0),
                    output_info_(NULL), probe_batch_rows_(NULL)
   {}
   void reuse() {
     cur_bkid_ = -1;
-    cur_tuple_ = reinterpret_cast<void *>(END_ITEM);
+    cur_tuple_ = reinterpret_cast<void *>(0x0000FFFFFFFFFFFF);
   }
   void reset()
   {
@@ -249,7 +251,8 @@ public:
   bool is_shared_;
   bool contain_ns_equal_;
 
-  const ExprFixedArray *join_conds_;
+  const ExprFixedArray *join_conds_; // equal_conds + other_conds
+  const ExprFixedArray *other_conds_;
   const ExprFixedArray *build_output_;
   const ExprFixedArray *probe_output_;
   const ExprFixedArray *calc_exprs_;
@@ -268,7 +271,19 @@ public:
   void *cur_tuple_;
   int64_t *max_output_cnt_;
 
-  void **cur_items_;
+  ObHJStoredRow **scan_chain_rows_; // equal key chain table
+  ObHJStoredRow **unmatch_rows_;
+  bool *join_cond_match_;
+  uint16_t *unmatch_sel_;
+  uint16_t unmatch_sel_cnt_;
+  ObBitVector *eval_skip_;
+
+  // for probe del
+  void **unmatch_bkts_;
+  ObHJStoredRow **unmatch_prev_rows_;
+  void **cur_bkts_;
+  ObHJStoredRow **prev_rows_;
+
   //template buffer for build table
   const ObHJStoredRow **stored_rows_;
   int64_t max_batch_size_;

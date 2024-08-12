@@ -50,30 +50,28 @@ int JoinHashTable::init(JoinTableCtx &hjt_ctx, ObIAllocator &allocator)
   if (hjt_ctx.is_shared_) {
     if (use_normalized ) {
       if (1 == hjt_ctx.build_keys_->count()) {
-        //hash_table_ = OB_NEWx(NormalizedSharedInt64Table, (&allocator));
-        hash_table_ = OB_NEWx(GenericSharedHashTable, (&allocator));
+        hash_table_ = OB_NEWx(SharedHashTable, (&allocator));
       } else if (2 == hjt_ctx.build_keys_->count()) {
-        //hash_table_ = OB_NEWx(NormalizedSharedInt128Table, (&allocator));
-        hash_table_ = OB_NEWx(GenericSharedHashTable, (&allocator));
+        hash_table_ = OB_NEWx(SharedHashTable, (&allocator));
       }
     } else {
-      hash_table_ = OB_NEWx(GenericSharedHashTable, (&allocator));
+      hash_table_ = OB_NEWx(SharedHashTable, (&allocator));
     }
   } else {
     if (use_normalized ) {
       if (1 == hjt_ctx.build_keys_->count()) {
-        hash_table_ = OB_NEWx(NormalizedInt64Table, (&allocator));
+        hash_table_ = OB_NEWx(RobinHashTable, (&allocator));
       } else if (2 == hjt_ctx.build_keys_->count()) {
-        hash_table_ = OB_NEWx(NormalizedInt128Table, (&allocator));
+        hash_table_ = OB_NEWx(RobinHashTable, (&allocator));
       }
     } else {
-      hash_table_ = OB_NEWx(GenericTable, (&allocator));
+      hash_table_ = OB_NEWx(RobinHashTable, (&allocator));
     }
   }
   if (NULL == hash_table_) {
     ret = OB_ALLOCATE_MEMORY_FAILED;
     LOG_WARN("fail to new hash table", K(ret));
-  } else if (OB_FAIL(hash_table_->init(allocator, hjt_ctx.max_batch_size_))) {
+  } else if (OB_FAIL(hash_table_->init(allocator))) {
     LOG_WARN("alloc bucket array failed", K(ret));
   }
   return ret;
@@ -81,7 +79,7 @@ int JoinHashTable::init(JoinTableCtx &hjt_ctx, ObIAllocator &allocator)
 
 int JoinHashTable::build_prepare(JoinTableCtx &ctx, int64_t row_count, int64_t bucket_count) {
   ctx.reuse();
-  return hash_table_->build_prepare(row_count, bucket_count);
+  return hash_table_->build_prepare(ctx, row_count, bucket_count);
 }
 
 int JoinHashTable::build(JoinPartitionRowIter &iter, JoinTableCtx &ctx) {
