@@ -23,6 +23,7 @@
 #include "sql/engine/sort/ob_sort_compare_vec_op.h"
 #include "sql/engine/sort/ob_sort_key_vec_op.h"
 #include "sql/engine/sort/ob_sort_key_fetcher_vec_op.h"
+#include "sql/engine/sort/ob_sort_normalized_hybrid_sort.h"
 #include "sql/engine/sort/ob_sort_vec_op_eager_filter.h"
 #include "sql/engine/sort/ob_sort_vec_op_store_row_factory.h"
 #include "observer/omt/ob_tenant_config_mgr.h"

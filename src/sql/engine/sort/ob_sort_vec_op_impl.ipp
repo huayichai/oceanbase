@@ -1456,17 +1456,59 @@ int ObSortVecOpImpl<Compare, Store_Row, has_addon>::sort_inmem_data()
       if (part_cnt_ > 0) {
         OZ(do_partition_sort(*sk_row_meta_, *rows_, begin, rows_->count()));
       } else if (enable_encode_sortkey_) {
-        bool can_encode = true;
-        ObAdaptiveQS<Store_Row> aqs(*rows_, *sk_row_meta_, mem_context_->get_malloc_allocator());
-        if (OB_FAIL(aqs.init(*rows_, mem_context_->get_malloc_allocator(), begin, rows_->count(),
-                             can_encode))) {
-          SQL_ENG_LOG(WARN, "failed to init aqs", K(ret));
-        } else if (can_encode) {
-          aqs.sort(begin, rows_->count());
+        bool is_normalized = false;
+        LOG_TRACE("[chy.sort]", K(sk_collations_->count()));
+        if (sk_collations_->count() <= 2) {
+          is_normalized = true;
+          for (int64_t i = 0; i < sk_collations_->count(); ++i) {
+            ObExpr *expr = sk_exprs_->at(sk_collations_->at(i).field_idx_);
+            LOG_TRACE("[chy.sort]", K(sk_collations_->at(i).field_idx_));
+            if (!ob_is_integer_type(expr->datum_meta_.type_) || 8 != expr->res_buf_len_) {
+              is_normalized = false;
+              break;
+            }
+          }
+        }
+        if (is_normalized) {
+          bool can_encode = true;
+          int64_t sk_count = sk_collations_->count();
+          if (1 == sk_count) {
+            Normalized64HybridSort<Store_Row> hybrid_sort(*rows_, *sk_row_meta_, mem_context_->get_malloc_allocator());
+            if (OB_FAIL(hybrid_sort.init(*rows_, mem_context_->get_malloc_allocator(), begin, rows_->count(),
+                                        can_encode))) {
+              SQL_ENG_LOG(WARN, "failed to init aqs", K(ret));
+            } else if (can_encode) {
+              hybrid_sort.sort(begin, rows_->count());
+            }
+          } else if (2 == sk_count) {
+            Normalized128HybridSort<Store_Row> hybrid_sort(*rows_, *sk_row_meta_, mem_context_->get_malloc_allocator());
+            if (OB_FAIL(hybrid_sort.init(*rows_, mem_context_->get_malloc_allocator(), begin, rows_->count(),
+                                        can_encode))) {
+              SQL_ENG_LOG(WARN, "failed to init aqs", K(ret));
+            } else if (can_encode) {
+              hybrid_sort.sort(begin, rows_->count());
+            }
+          } else {
+            ret = OB_ERR_UNEXPECTED;
+          }
+          if (!can_encode) {
+            enable_encode_sortkey_ = false;
+            comp_.fallback_to_disable_encode_sortkey();
+            lib::ob_sort(&rows_->at(begin), &rows_->at(0) + rows_->count(), CopyableComparer(comp_));
+          }
         } else {
-          enable_encode_sortkey_ = false;
-          comp_.fallback_to_disable_encode_sortkey();
-          lib::ob_sort(&rows_->at(begin), &rows_->at(0) + rows_->count(), CopyableComparer(comp_));
+          bool can_encode = true;
+          ObAdaptiveQS<Store_Row> aqs(*rows_, *sk_row_meta_, mem_context_->get_malloc_allocator());
+          if (OB_FAIL(aqs.init(*rows_, mem_context_->get_malloc_allocator(), begin, rows_->count(),
+                              can_encode))) {
+            SQL_ENG_LOG(WARN, "failed to init aqs", K(ret));
+          } else if (can_encode) {
+            aqs.sort(begin, rows_->count());
+          } else {
+            enable_encode_sortkey_ = false;
+            comp_.fallback_to_disable_encode_sortkey();
+            lib::ob_sort(&rows_->at(begin), &rows_->at(0) + rows_->count(), CopyableComparer(comp_));
+          }
         }
       } else {
         lib::ob_sort(&rows_->at(begin), &rows_->at(0) + rows_->count(), CopyableComparer(comp_));
